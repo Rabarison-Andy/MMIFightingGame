@@ -2,106 +2,61 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
-/// <summary>
-/// Gère la barre de vie du personnage et les événements de mort
-/// </summary>
 public class HealthBar : MonoBehaviour
 {
-    [System.Serializable]
-    public class DeathEvent : UnityEvent<GameObject> { }
-
-    [Header("Health Settings")]
-    [SerializeField]
-    [Tooltip("Référence au Slider UI qui représente la barre de vie")]
-    private Slider healthSlider;
-
-    [SerializeField]
-    [Tooltip("Points de vie maximum du personnage")]
-    private float maxHealth = 100f;
-
-    [Header("Death Settings")]
-    [SerializeField]
-    [Tooltip("Événement déclenché lorsque le personnage meurt")]
-    private DeathEvent onDeath;
+    [SerializeField] private Slider healthSlider;
+    [SerializeField] private float maxHealth = 100f;
+    [SerializeField] private UnityEvent<GameObject> onDeath;
 
     private float currentHealth;
-    private bool isDead = false;
+    private bool isDead;
+    private float lastHealthUpdate;
 
-    public DeathEvent OnDeath => onDeath;
+    public UnityEvent<GameObject> OnDeath => onDeath;
 
-    private void Start()
-    {
-        InitializeHealth();
-    }
+    private void Start() => InitializeHealth();
 
     private void Update()
     {
-        UpdateHealthDisplay();
-    }
-
-    /// <summary>
-    /// Initialise les points de vie au maximum
-    /// </summary>
-    private void InitializeHealth()
-    {
-        currentHealth = maxHealth;
-        isDead = false;
-        UpdateHealthDisplay();
-    }
-
-    /// <summary>
-    /// Met à jour l'affichage de la barre de vie
-    /// </summary>
-    private void UpdateHealthDisplay()
-    {
-        if (healthSlider != null && healthSlider.value != currentHealth)
+        if (Mathf.Abs(healthSlider.value - currentHealth) > 0.01f)
         {
-            healthSlider.value = currentHealth;
+            healthSlider.value = Mathf.Lerp(healthSlider.value, currentHealth, Time.deltaTime * 10f);
         }
     }
 
-    /// <summary>
-    /// Inflige des dégâts au personnage
-    /// </summary>
-    /// <param name="damage">Quantité de dégâts à infliger</param>
     public void TakeDamage(float damage)
     {
         if (isDead) return;
 
         currentHealth = Mathf.Max(0, currentHealth - damage);
-        UpdateHealthDisplay();
+        UpdateHealthVisual();
 
-        if (currentHealth <= 0 && !isDead)
+        if (currentHealth <= 0)
         {
             HandleDeath();
         }
     }
 
-    /// <summary>
-    /// Gère la mort du personnage
-    /// </summary>
+    public void ResetHealth() => InitializeHealth();
+
+    public bool IsAlive() => !isDead;
+
+    private void InitializeHealth()
+    {
+        currentHealth = maxHealth;
+        isDead = false;
+        healthSlider.value = currentHealth;
+    }
+
     private void HandleDeath()
     {
         isDead = true;
-        Debug.Log(gameObject.name + " est KO !");
-        
-        // Déclenche l'événement de mort
         onDeath.Invoke(gameObject);
     }
 
-    /// <summary>
-    /// Retourne true si le personnage est en vie
-    /// </summary>
-    public bool IsAlive()
+    private void UpdateHealthVisual()
     {
-        return !isDead;
-    }
-
-    /// <summary>
-    /// Réinitialise complètement la santé du personnage
-    /// </summary>
-    public void ResetHealth()
-    {
-        InitializeHealth();
+        // Immediately update slider value when taking damage
+        healthSlider.value = currentHealth;
     }
 }

@@ -1,333 +1,245 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-/// <summary>
-/// Gère les mouvements et la rotation du personnage
-/// </summary>
 [RequireComponent(typeof(CharacterController))]
-[RequireComponent(typeof(Animator))]
-public class PlayerControler : MonoBehaviour
+[RequireComponent(typeof(HealthBar))]
+public class PlayerController : MonoBehaviour
 {
-    // Vitesses de déplacement
-    [SerializeField]
-    private float walkSpeed = 3.0f;
-    private float runSpeed;
+    [SerializeField] private float walkSpeed = 3.0f;
+    [SerializeField] private float runSpeedMultiplier = 3.75f;
+    [SerializeField] private bool initialFacingLeft = false;
+    [SerializeField] private float punchDamage = 10f;
+    [SerializeField] private float kickDamage = 20f;
+    [SerializeField] private float attackRange = 1.5f;
+    [SerializeField] private float punchDuration = 0.5f;
+    [SerializeField] private float kickDuration = 0.7f;
+    [SerializeField] private GameObject deathCanvasPrefab;
+    [SerializeField] private float deathDisableDelay = 0.5f;
+    [SerializeField] private float groundedHeight = 0.5f;
 
-    //Animator du personnage
-    private Animator animatorMonkey;
-
-    // Direction initiale du personnage
-    [SerializeField]
-    private bool isLookingLeft = false;
-
-    // Dégâts des attaques
-    [SerializeField]
-    private float punchDamage = 10f;
-    [SerializeField]
-    private float kickDamage = 20f;
-    [SerializeField]
-    private float attackRange = 1.5f;
-
-    // Durée des animations d'attaque
-    [SerializeField]
-    private float punchDuration = 0.5f;
-    [SerializeField]
-    private float kickDuration = 0.7f;
-
-    // Canva qui apparait lors de la mort d'un jour
-    [SerializeField]
-    private GameObject deathCanvasPrefab;
-
-    // Composants et états
     private CharacterController characterController;
+    private Animator characterAnimator;
     private HealthBar healthBar;
-    private Vector2 moveDirection = Vector2.zero;
-    private bool isRunning = false;
+    private Vector2 moveInput;
+    private float currentRunSpeed;
+    private bool isRunning;
     private bool isFacingLeft;
-    private bool isDead = false;
-    
-    // États des attaques
-    private bool isPunching = false;
-    private bool isKicking = false;
-    private float currentPunchTime = 0f;
-    private float currentKickTime = 0f;
+    private bool isDead;
+    private bool isPunching;
+    private bool isKicking;
+    private float elapsedPunchTime;
+    private float elapsedKickTime;
+    private bool isSamurai;
 
-    // IDs des paramètres de l'Animator pour l'optimisation
-    private readonly int triggerRunMonkey = Animator.StringToHash("TriggerRunMonkey");
-    private readonly int triggerPunchMonkey = Animator.StringToHash("TriggerPunchMonkey");
-    private readonly int triggerKickMonkey = Animator.StringToHash("TriggerKickMonkey");
-    private readonly int triggerChasedStepMonkey = Animator.StringToHash("TriggerChasedStepMonkey");
-    private readonly int boolIsRunning = Animator.StringToHash("IsRunning"); // Supposition: un booléen pour l'état de course est plus courant
-    private readonly int triggerDeath = Animator.StringToHash("TriggerDeath");
+    private const string SamuraiPrefabName = "samuraiPrefab";
+    private int isRunningAnimHash;
+    private int deathTriggerAnimHash;
+    private int deathBoolAnimHash;
 
     private void Awake()
     {
-        // On s'assure d'avoir les composants dès le début
         characterController = GetComponent<CharacterController>();
-        animatorMonkey = GetComponent<Animator>();
         healthBar = GetComponent<HealthBar>();
-        
-        if (characterController == null)
-        {
-            Debug.LogError("CharacterController non trouvé sur " + gameObject.name);
-            enabled = false; // Désactive le script si pas de CharacterController
-            return;
-        }
-        if (animatorMonkey == null)
-        {
-            Debug.LogError("Animator non trouvé sur " + gameObject.name);
-            enabled = false; // Désactive le script si pas d'Animator
-            return;
-        }
-        if (healthBar == null)
-        {
-            Debug.LogError("HealthBar manquant sur " + gameObject.name);
-            enabled = false;
-            return;
-        }
+        characterAnimator = GetComponentInChildren<AnimatorManager>()?.GetComponent<Animator>();
+
+        ValidateComponents();
+        InitializeAnimatorHashes();
     }
 
     private void Start()
     {
-        InitializeComponents();
-        SetupInitialState();
+        currentRunSpeed = walkSpeed * runSpeedMultiplier;
+        isFacingLeft = initialFacingLeft;
+        UpdateCharacterRotation();
+        DetectCharacterType();
+        healthBar.OnDeath.AddListener(HandleDeath);
     }
 
-    // Initialise les composants nécessaires
-    private void InitializeComponents()
+    private void ValidateComponents()
     {
-        runSpeed = walkSpeed * 3.75f;
-        
-        // Vérification supplémentaire avant d'ajouter le listener
-        if (healthBar != null)
+        if (characterController == null || characterAnimator == null || healthBar == null)
         {
-            healthBar.OnDeath.AddListener(HandleDeath);
-        }
-        else
-        {
-            Debug.LogError("Référence HealthBar non assignée");
+            Debug.LogError("Missing required components on " + gameObject.name);
             enabled = false;
         }
     }
 
-    // Configure l'état initial du personnage
-    private void SetupInitialState()
+    private void InitializeAnimatorHashes()
     {
-        isFacingLeft = isLookingLeft;
-        UpdatePlayerRotation();
+        isRunningAnimHash = Animator.StringToHash("IsRunning");
+        deathTriggerAnimHash = Animator.StringToHash("TriggerDeath");
     }
 
-    private void HandleDeath(GameObject deadPlayer)
+    private void DetectCharacterType()
+    {
+        isSamurai = transform.Find(SamuraiPrefabName)?.gameObject.activeSelf ?? false;
+        deathBoolAnimHash = Animator.StringToHash(isSamurai ? "DeadSamurai" : "DeadMonkey");
+    }
+
+    public void OnMove(InputAction.CallbackContext context)
+    {
+        if (isDead) return;
+
+        moveInput = context.ReadValue<Vector2>();
+        UpdateFacingDirection();
+
+        if (!isRunning && moveInput.x != 0 && !IsAttacking())
+        {
+            TriggerMovementAnimation();
+        }
+    }
+
+    public void OnRun(InputAction.CallbackContext context)
+    {
+        if (isDead) return;
+
+        if (context.performed) StartRunning();
+        else if (context.canceled) StopRunning();
+    }
+
+    private void StartRunning()
+    {
+        if (characterAnimator.runtimeAnimatorController == null) return;
+
+        isRunning = true;
+        characterAnimator.SetBool(isRunningAnimHash, true);
+        TriggerCharacterSpecificAnimation("Run");
+    }
+
+    private void StopRunning()
+    {
+        isRunning = false;
+        characterAnimator.SetBool(isRunningAnimHash, false);
+    }
+
+    private void UpdateFacingDirection()
+    {
+        if (isRunning && moveInput.x != 0)
+        {
+            isFacingLeft = moveInput.x < 0;
+            UpdateCharacterRotation();
+        }
+    }
+
+    private void UpdateCharacterRotation()
+    {
+        float yRotation = isFacingLeft ? -90f : 90f;
+        transform.rotation = Quaternion.Euler(0f, yRotation, 0f);
+    }
+
+    private void TriggerMovementAnimation()
+    {
+        TriggerCharacterSpecificAnimation("ChasedStep");
+    }
+
+    public void OnPunch(InputAction.CallbackContext context)
+    {
+        if (context.started && CanAttack()) StartPunch();
+    }
+
+    private void StartPunch()
+    {
+        isPunching = true;
+        elapsedPunchTime = 0f;
+        TriggerCharacterSpecificAnimation("Punch");
+        PerformAttack(punchDamage);
+    }
+
+    public void OnKick(InputAction.CallbackContext context)
+    {
+        if (context.started && CanAttack()) StartKick();
+    }
+
+    private void StartKick()
+    {
+        isKicking = true;
+        elapsedKickTime = 0f;
+        TriggerCharacterSpecificAnimation("Kick");
+        PerformAttack(kickDamage);
+    }
+
+    private bool CanAttack() => !isDead && !isPunching && !isKicking && !isRunning;
+
+    private void PerformAttack(float damage)
+    {
+        Vector3 attackDirection = isFacingLeft ? Vector3.left : Vector3.right;
+        RaycastHit[] hits = Physics.RaycastAll(transform.position, attackDirection, attackRange);
+
+        foreach (RaycastHit hit in hits)
+        {
+            if (hit.collider.gameObject == gameObject) continue;
+
+            HealthBar targetHealth = hit.collider.GetComponent<HealthBar>();
+            if (targetHealth != null)
+            {
+                targetHealth.TakeDamage(damage);
+                break;
+            }
+        }
+    }
+
+    private void HandleDeath(GameObject deadCharacter)
     {
         if (isDead) return;
 
         isDead = true;
-        
-        // Arrêt des mouvements
-        walkSpeed = 0;
-        runSpeed = 0;
-        moveDirection = Vector2.zero;
-        
-        // Désactivation des composants
+        DisableMovement();
+        characterAnimator.SetTrigger(deathTriggerAnimHash);
+        ShowDeathCanvas();
+        Invoke(nameof(DisableScript), deathDisableDelay);
+    }
+
+    private void DisableMovement()
+    {
+        walkSpeed = 0f;
+        currentRunSpeed = 0f;
+        moveInput = Vector2.zero;
         characterController.enabled = false;
-        
-        // Animation de mort
-        animatorMonkey.SetTrigger(triggerDeath);
-        
-        // Affichage du canvas de mort
-        if (deathCanvasPrefab != null)
-        {
-            Instantiate(deathCanvasPrefab, Vector3.zero, Quaternion.identity);
-        }
-        
-        // Désactive ce script après un court délai
-        Invoke("DisableScript", 0.5f);
     }
 
-    /// Désactive ce script
-    private void DisableScript()
+    private void ShowDeathCanvas()
     {
-        enabled = false;
+        Instantiate(deathCanvasPrefab, Vector3.zero, Quaternion.identity);
     }
 
-    // Gère le déplacement du personnage
-    public void OnMove(InputAction.CallbackContext context) 
+    private void DisableScript() => enabled = false;
+
+    private void Update()
     {
         if (isDead) return;
 
-        moveDirection = context.ReadValue<Vector2>();
-        UpdatePlayerDirection();
-
-        // Déclenche l'animation de marche/pas chassé si on bouge mais ne court pas
-        if (!isRunning && moveDirection.x != 0 && !IsAttacking())
-        {
-            animatorMonkey?.SetTrigger(triggerChasedStepMonkey);
-        }
+        UpdateAttackTimers();
+        if (!IsAttacking()) MoveCharacter();
+        MaintainGroundedHeight();
     }
 
-    // Met à jour la direction du personnage pendant la course
-    private void UpdatePlayerDirection()
+    private void UpdateAttackTimers()
     {
-        if (isRunning && moveDirection.x != 0)
-        {
-            isFacingLeft = moveDirection.x < 0;
-            UpdatePlayerRotation();
-        }
+        if (isPunching && (elapsedPunchTime += Time.deltaTime) >= punchDuration) isPunching = false;
+        if (isKicking && (elapsedKickTime += Time.deltaTime) >= kickDuration) isKicking = false;
     }
 
-    // Applique la rotation du personnage
-    private void UpdatePlayerRotation()
+    private void MoveCharacter()
     {
-        float rotationAngle = isFacingLeft ? -90 : 90;
-        transform.rotation = Quaternion.Euler(0, rotationAngle, 0);
+        Vector3 movement = new Vector3(moveInput.x, 0f, 0f);
+        float currentSpeed = isRunning ? currentRunSpeed : walkSpeed;
+        characterController.Move(movement * currentSpeed * Time.deltaTime);
     }
 
-    // Gère l'état de course du personnage
-    public void OnRun(InputAction.CallbackContext context) 
+    private void MaintainGroundedHeight()
     {
-        if (context.started || context.performed)
-        {
-            StartRunning();
-        }
-        else if (context.canceled)
-        {
-            StopRunning();
-        }
+        Vector3 position = transform.position;
+        position.y = groundedHeight;
+        transform.position = position;
     }
 
-    // Active le mode course
-    private void StartRunning()
+    private void TriggerCharacterSpecificAnimation(string animationBaseName)
     {
-        isRunning = true;
-        animatorMonkey?.SetBool(boolIsRunning, true); // Utilise un booléen pour la course
-        // animatorMonkey?.SetTrigger(triggerRunMonkey); // Alternative si vous préférez un trigger
-        if (moveDirection.x != 0)
-        {
-            isFacingLeft = moveDirection.x < 0;
-            UpdatePlayerRotation();
-        }
+        if (characterAnimator == null) return;
+
+        string triggerName = $"Trigger{animationBaseName}{(isSamurai ? "Samurai" : "Monkey")}";
+        characterAnimator.SetTrigger(Animator.StringToHash(triggerName));
     }
 
-    // Désactive le mode course
-    private void StopRunning()
-    {
-        isRunning = false;
-        animatorMonkey?.SetBool(boolIsRunning, false); // Utilise un booléen pour la course
-    }
-
-    // Gère l'attaque de coup de poing
-    public void OnPunch(InputAction.CallbackContext context)
-    {
-        if (isDead) return;
-
-        if (context.started && CanAttack())
-        {
-            StartPunch();
-        }
-    }
-
-    // Gère l'attaque de coup de pied
-    public void OnKick(InputAction.CallbackContext context)
-    {
-        if (isDead) return;
-
-        if (context.started && CanAttack())
-        {
-            StartKick();
-        }
-    }
-
-    // Vérifie si le personnage peut attaquer
-    private bool CanAttack()
-    {
-        return !isPunching && !isKicking && !isRunning; // Empêche d'attaquer en courant ou pendant une autre attaque
-    }
-
-    // Démarre l'animation de coup de poing
-    private void StartPunch()
-    {
-        isPunching = true;
-        currentPunchTime = 0f;
-        animatorMonkey?.SetTrigger(triggerPunchMonkey);
-        TryAttack(punchDamage);
-    }
-
-    // Démarre l'animation de coup de pied
-    private void StartKick()
-    {
-        isKicking = true;
-        currentKickTime = 0f;
-        animatorMonkey?.SetTrigger(triggerKickMonkey);
-        TryAttack(kickDamage);
-    }
-
-    // Met à jour les animations d'attaque
-    private void UpdateAttacks()
-    {
-        if (isPunching)
-        {
-            currentPunchTime += Time.deltaTime;
-            if (currentPunchTime >= punchDuration)
-            {
-                isPunching = false;
-            }
-        }
-
-        if (isKicking)
-        {
-            currentKickTime += Time.deltaTime;
-            if (currentKickTime >= kickDuration)
-            {
-                isKicking = false;
-            }
-        }
-    }
-
-    /// Essaie d'attaquer un adversaire dans la portée
-    private void TryAttack(float damage)
-    {
-        // Détermine la direction de l'attaque
-        Vector3 attackDirection = isFacingLeft ? Vector3.left : Vector3.right;
-        
-        // Lance un rayon pour détecter l'adversaire
-        RaycastHit[] hits = Physics.RaycastAll(transform.position, attackDirection, attackRange);
-        
-        foreach (RaycastHit hit in hits)
-        {
-            // Vérifie si on a touché un autre joueur
-            HealthBar enemyHealth = hit.collider.GetComponent<HealthBar>();
-            if (enemyHealth != null && hit.collider.gameObject != gameObject)
-            {
-                enemyHealth.TakeDamage(damage);
-                break; // Ne frappe que le premier adversaire touché
-            }
-        }
-    }
-
-    // Mise à jour du mouvement à chaque frame
-    void Update()
-    {
-        if (characterController != null)
-        {
-            UpdateAttacks();
-            if (!IsAttacking()) // Ne permet le mouvement que si on n'attaque pas
-            {
-                MovePlayer();
-            }
-        }
-    }
-
-    // Déplace le personnage
-    private void MovePlayer()
-    {
-        float currentSpeed = isRunning ? runSpeed : walkSpeed;
-        Vector3 movement = new Vector3(moveDirection.x, 0, 0);
-        characterController.Move(movement * Time.deltaTime * currentSpeed);
-    }
-
-    // Retourne si le personnage est en train d'attaquer
-    public bool IsAttacking()
-    {
-        return isPunching || isKicking;
-    }
+    private bool IsAttacking() => isPunching || isKicking;
 }

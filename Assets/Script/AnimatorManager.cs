@@ -10,10 +10,7 @@ public class AnimatorManager : MonoBehaviour
         public RuntimeAnimatorController samuraiController;
     }
 
-    [Header("Configuration")]
     [SerializeField] private CharacterAnimations characterAnimations;
-
-    [Header("Références")]
     [SerializeField] private SelectPlayer selectPlayer;
     [SerializeField] private Transform characterParent;
 
@@ -22,7 +19,6 @@ public class AnimatorManager : MonoBehaviour
 
     private void Start()
     {
-        // Correction du nom de la méthode
         selectPlayer.OnCharacterSelected.AddListener(HandleCharacterSelected);
         InitializeCurrentCharacter();
     }
@@ -42,7 +38,6 @@ public class AnimatorManager : MonoBehaviour
 
     private void HandleCharacterSelected(int playerNumber, string characterType)
     {
-        // Vérification du tag du joueur
         string playerTag = playerNumber == 1 ? "Player1" : "Player2";
         
         if (gameObject.CompareTag(playerTag))
@@ -69,7 +64,6 @@ public class AnimatorManager : MonoBehaviour
 
     private void OnDestroy()
     {
-        // Nettoyage des listeners
         if (selectPlayer != null)
         {
             selectPlayer.OnCharacterSelected.RemoveListener(HandleCharacterSelected);
