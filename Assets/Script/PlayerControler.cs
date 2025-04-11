@@ -1,25 +1,35 @@
+// Remplace TOUT le contenu actuel de PlayerController.cs par ce code :
 using UnityEngine;
 using UnityEngine.InputSystem;
+using System.Collections;
 
 [RequireComponent(typeof(CharacterController))]
 [RequireComponent(typeof(HealthBar))]
 public class PlayerController : MonoBehaviour
 {
+    [Header("Movement Settings")]
     [SerializeField] private float walkSpeed = 3.0f;
     [SerializeField] private float runSpeedMultiplier = 3.75f;
     [SerializeField] private bool initialFacingLeft = false;
+
+    [Header("Combat Settings")]
     [SerializeField] private float punchDamage = 10f;
     [SerializeField] private float kickDamage = 20f;
     [SerializeField] private float attackRange = 1.5f;
     [SerializeField] private float punchDuration = 0.5f;
     [SerializeField] private float kickDuration = 0.7f;
+
+    [Header("UI Settings")]
     [SerializeField] private GameObject deathCanvasPrefab;
     [SerializeField] private float deathDisableDelay = 0.5f;
-    [SerializeField] private float groundedHeight = 0.5f;
 
+    // Components
     private CharacterController characterController;
+    private AnimatorManager animatorManager;
     private Animator characterAnimator;
     private HealthBar healthBar;
+
+    // State
     private Vector2 moveInput;
     private float currentRunSpeed;
     private bool isRunning;
@@ -31,7 +41,7 @@ public class PlayerController : MonoBehaviour
     private float elapsedKickTime;
     private bool isSamurai;
 
-    private const string SamuraiPrefabName = "samuraiPrefab";
+    // Animation Hashes
     private int isRunningAnimHash;
     private int deathTriggerAnimHash;
     private int deathBoolAnimHash;
@@ -40,26 +50,35 @@ public class PlayerController : MonoBehaviour
     {
         characterController = GetComponent<CharacterController>();
         healthBar = GetComponent<HealthBar>();
-        characterAnimator = GetComponentInChildren<AnimatorManager>()?.GetComponent<Animator>();
+        animatorManager = GetComponentInChildren<AnimatorManager>();
+        characterAnimator = animatorManager?.GetComponent<Animator>();
 
         ValidateComponents();
         InitializeAnimatorHashes();
     }
 
-    private void Start()
-    {
-        currentRunSpeed = walkSpeed * runSpeedMultiplier;
-        isFacingLeft = initialFacingLeft;
-        UpdateCharacterRotation();
-        DetectCharacterType();
-        healthBar.OnDeath.AddListener(HandleDeath);
-    }
+    private IEnumerator Start()
+{
+    currentRunSpeed = walkSpeed * runSpeedMultiplier;
+    isFacingLeft = initialFacingLeft;
+    UpdateCharacterRotation();
+
+    enabled = false; // désactive les updates jusqu’à setup terminé
+
+    yield return new WaitUntil(() => animatorManager != null && animatorManager.IsReady);
+    DetectCharacterType();
+
+    enabled = true; // reactive après setup
+
+    healthBar.OnDeath.AddListener(HandleDeath);
+}
+
 
     private void ValidateComponents()
     {
-        if (characterController == null || characterAnimator == null || healthBar == null)
+        if (characterController == null || characterAnimator == null || healthBar == null || animatorManager == null)
         {
-            Debug.LogError("Missing required components on " + gameObject.name);
+            Debug.LogError($"Missing components on {gameObject.name}!");
             enabled = false;
         }
     }
@@ -72,7 +91,7 @@ public class PlayerController : MonoBehaviour
 
     private void DetectCharacterType()
     {
-        isSamurai = transform.Find(SamuraiPrefabName)?.gameObject.activeSelf ?? false;
+        isSamurai = animatorManager.CurrentCharacterType == "samurai";
         deathBoolAnimHash = Animator.StringToHash(isSamurai ? "DeadSamurai" : "DeadMonkey");
     }
 
@@ -93,28 +112,37 @@ public class PlayerController : MonoBehaviour
     {
         if (isDead) return;
 
-        if (context.performed) StartRunning();
-        else if (context.canceled) StopRunning();
+        if (context.performed)
+            StartRunning();
+        else if (context.canceled)
+            StopRunning();
     }
 
     private void StartRunning()
-    {
-        if (characterAnimator.runtimeAnimatorController == null) return;
+{
+    if (!animatorManager.IsReady || characterAnimator.runtimeAnimatorController == null) return;
 
-        isRunning = true;
-        characterAnimator.SetBool(isRunningAnimHash, true);
+    isRunning = true;
+    characterAnimator.SetBool(isRunningAnimHash, true);
+
+    if (moveInput.x != 0 && !IsAttacking())
+        TriggerCharacterSpecificAnimation("ChasedStepAndRun");
+    else
         TriggerCharacterSpecificAnimation("Run");
-    }
+}
 
     private void StopRunning()
-    {
-        isRunning = false;
-        characterAnimator.SetBool(isRunningAnimHash, false);
-    }
+{
+    isRunning = false;
+
+    if (characterAnimator == null || characterAnimator.runtimeAnimatorController == null) return;
+
+    characterAnimator.SetBool(isRunningAnimHash, false);
+}
 
     private void UpdateFacingDirection()
     {
-        if (isRunning && moveInput.x != 0)
+        if (moveInput.x != 0)
         {
             isFacingLeft = moveInput.x < 0;
             UpdateCharacterRotation();
@@ -127,9 +155,42 @@ public class PlayerController : MonoBehaviour
         transform.rotation = Quaternion.Euler(0f, yRotation, 0f);
     }
 
+    private void TriggerCharacterSpecificAnimation(string animationBaseName)
+    {
+        if (!animatorManager.IsReady || characterAnimator.runtimeAnimatorController == null)
+        {
+            Debug.LogWarning($"Animation system not ready for: {animationBaseName}");
+            return;
+        }
+
+        string triggerName = $"Trigger{animationBaseName}{(isSamurai ? "Samurai" : "Monkey")}";
+        characterAnimator.SetTrigger(Animator.StringToHash(triggerName));
+    }
+
     private void TriggerMovementAnimation()
     {
-        TriggerCharacterSpecificAnimation("ChasedStep");
+        if (!animatorManager.IsReady || characterAnimator.runtimeAnimatorController == null) return;
+
+        if (moveInput.x != 0 && !isRunning && !IsAttacking())
+        {
+            TriggerCharacterSpecificAnimation("ChasedStep");
+        }
+    }
+
+    private void TriggerCombinedAnimation(string action)
+    {
+        if (!animatorManager.IsReady || characterAnimator.runtimeAnimatorController == null)
+            return;
+
+        string prefix = "";
+
+        if (isRunning)
+            prefix = "RunAnd";
+        else if (moveInput.x != 0)
+            prefix = "ChasedStepAnd";
+
+        string finalTriggerName = $"Trigger{prefix}{action}{(isSamurai ? "Samurai" : "Monkey")}";
+        characterAnimator.SetTrigger(Animator.StringToHash(finalTriggerName));
     }
 
     public void OnPunch(InputAction.CallbackContext context)
@@ -141,7 +202,12 @@ public class PlayerController : MonoBehaviour
     {
         isPunching = true;
         elapsedPunchTime = 0f;
-        TriggerCharacterSpecificAnimation("Punch");
+
+        if (isRunning || moveInput.x != 0)
+            TriggerCombinedAnimation("Punch");
+        else
+            TriggerCharacterSpecificAnimation("Punch");
+
         PerformAttack(punchDamage);
     }
 
@@ -154,7 +220,12 @@ public class PlayerController : MonoBehaviour
     {
         isKicking = true;
         elapsedKickTime = 0f;
-        TriggerCharacterSpecificAnimation("Kick");
+
+        if (isRunning || moveInput.x != 0)
+            TriggerCombinedAnimation("Kick");
+        else
+            TriggerCharacterSpecificAnimation("Kick");
+
         PerformAttack(kickDamage);
     }
 
@@ -169,8 +240,7 @@ public class PlayerController : MonoBehaviour
         {
             if (hit.collider.gameObject == gameObject) continue;
 
-            HealthBar targetHealth = hit.collider.GetComponent<HealthBar>();
-            if (targetHealth != null)
+            if (hit.collider.TryGetComponent<HealthBar>(out var targetHealth))
             {
                 targetHealth.TakeDamage(damage);
                 break;
@@ -199,7 +269,8 @@ public class PlayerController : MonoBehaviour
 
     private void ShowDeathCanvas()
     {
-        Instantiate(deathCanvasPrefab, Vector3.zero, Quaternion.identity);
+        if (deathCanvasPrefab != null)
+            Instantiate(deathCanvasPrefab, Vector3.zero, Quaternion.identity);
     }
 
     private void DisableScript() => enabled = false;
@@ -210,13 +281,15 @@ public class PlayerController : MonoBehaviour
 
         UpdateAttackTimers();
         if (!IsAttacking()) MoveCharacter();
-        MaintainGroundedHeight();
     }
 
     private void UpdateAttackTimers()
     {
-        if (isPunching && (elapsedPunchTime += Time.deltaTime) >= punchDuration) isPunching = false;
-        if (isKicking && (elapsedKickTime += Time.deltaTime) >= kickDuration) isKicking = false;
+        if (isPunching) elapsedPunchTime += Time.deltaTime;
+        if (isKicking) elapsedKickTime += Time.deltaTime;
+
+        if (elapsedPunchTime >= punchDuration) isPunching = false;
+        if (elapsedKickTime >= kickDuration) isKicking = false;
     }
 
     private void MoveCharacter()
@@ -224,21 +297,6 @@ public class PlayerController : MonoBehaviour
         Vector3 movement = new Vector3(moveInput.x, 0f, 0f);
         float currentSpeed = isRunning ? currentRunSpeed : walkSpeed;
         characterController.Move(movement * currentSpeed * Time.deltaTime);
-    }
-
-    private void MaintainGroundedHeight()
-    {
-        Vector3 position = transform.position;
-        position.y = groundedHeight;
-        transform.position = position;
-    }
-
-    private void TriggerCharacterSpecificAnimation(string animationBaseName)
-    {
-        if (characterAnimator == null) return;
-
-        string triggerName = $"Trigger{animationBaseName}{(isSamurai ? "Samurai" : "Monkey")}";
-        characterAnimator.SetTrigger(Animator.StringToHash(triggerName));
     }
 
     private bool IsAttacking() => isPunching || isKicking;

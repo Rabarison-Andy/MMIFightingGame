@@ -4,147 +4,121 @@ using UnityEngine.Events;
 
 public class SelectPlayer : MonoBehaviour
 {
-    [SerializeField] private GameObject selectionMenu;
-    [SerializeField] private Button monkeyButtonP1;
-    [SerializeField] private Button samuraiButtonP1;
-    [SerializeField] private Button monkeyButtonP2;
-    [SerializeField] private Button samuraiButtonP2;
-    [SerializeField] private Transform player1Parent;
-    [SerializeField] private Transform player2Parent;
+    [System.Serializable]
+    public class CharacterSelectedEvent : UnityEvent<int, string> { }
 
-    public UnityEvent<int, string> OnCharacterSelected = new UnityEvent<int, string>();
+    [SerializeField] 
+    private GameObject selectionMenu;
+    public CharacterSelectedEvent OnCharacterSelected = new CharacterSelectedEvent();
 
-    private const string MonkeyPrefabName = "monkeyPrefab";
-    private const string SamuraiPrefabName = "samuraiPrefab";
-    private const string MonkeyCharacterType = "Monkey";
-    private const string SamuraiCharacterType = "Samurai";
-    
-    private GameObject player1Monkey;
-    private GameObject player1Samurai;
-    private GameObject player2Monkey;
-    private GameObject player2Samurai;
-    
-    private bool isPlayer1Selected;
-    private bool isPlayer2Selected;
+    [SerializeField] 
+    private Button monkeyButtonP1;
+    [SerializeField] 
+    private Button samuraiButtonP1;
+
+    [SerializeField] 
+    private Button monkeyButtonP2;
+    [SerializeField] 
+    private Button samuraiButtonP2;
+
+    [SerializeField] 
+    private Transform player1;
+    [SerializeField] 
+    private Transform player2;
+
+    private bool isP1Selected = false;
+    private bool isP2Selected = false;
+
+    private GameObject p1Monkey;
+    private GameObject p1Samurai;
+    private GameObject p2Monkey;
+    private GameObject p2Samurai;
 
     private void Start()
     {
-        PauseGame();
-        CacheCharacterPrefabs();
-        InitializeCharacterVisibility();
-        SetupButtonListeners();
-    }
-
-    private void PauseGame() => Time.timeScale = 0;
-
-    private void CacheCharacterPrefabs()
-    {
-        player1Monkey = FindChildPrefab(player1Parent, MonkeyPrefabName);
-        player1Samurai = FindChildPrefab(player1Parent, SamuraiPrefabName);
-        player2Monkey = FindChildPrefab(player2Parent, MonkeyPrefabName);
-        player2Samurai = FindChildPrefab(player2Parent, SamuraiPrefabName);
-    }
-
-    private GameObject FindChildPrefab(Transform parent, string prefabName)
-    {
-        Transform child = parent.Find(prefabName);
-        if (child == null)
+        Time.timeScale = 0;
+        if (player1 == null || player2 == null)
         {
-            Debug.LogError($"Missing {prefabName} under {parent.name}");
+            Debug.LogError("Les transforms des joueurs ne sont pas assignés!");
             enabled = false;
-            return null;
+            return;
         }
-        return child.gameObject;
-    }
 
-    private void InitializeCharacterVisibility()
-    {
-        SetActiveStateForAllPrefabs(false);
-    }
-
-    private void SetActiveStateForAllPrefabs(bool state)
-    {
-        player1Monkey.SetActive(state);
-        player1Samurai.SetActive(state);
-        player2Monkey.SetActive(state);
-        player2Samurai.SetActive(state);
-    }
-
-    private void SetupButtonListeners()
-    {
-        monkeyButtonP1.onClick.AddListener(() => HandleSelection(1, MonkeyCharacterType));
-        samuraiButtonP1.onClick.AddListener(() => HandleSelection(1, SamuraiCharacterType));
-        monkeyButtonP2.onClick.AddListener(() => HandleSelection(2, MonkeyCharacterType));
-        samuraiButtonP2.onClick.AddListener(() => HandleSelection(2, SamuraiCharacterType));
-    }
-
-    private void HandleSelection(int playerNumber, string characterType)
-    {
-        if (IsSelectionInvalid(playerNumber)) return;
-
-        UpdateCharacterModel(playerNumber, characterType);
-        NotifySelection(playerNumber, characterType);
-        CheckGameStartCondition();
-    }
-
-    private bool IsSelectionInvalid(int playerNumber)
-    {
-        return (playerNumber == 1 && isPlayer1Selected) || 
-               (playerNumber == 2 && isPlayer2Selected);
-    }
-
-    private void UpdateCharacterModel(int playerNumber, string characterType)
-    {
-        bool isMonkey = characterType == MonkeyCharacterType;
-        
-        if (playerNumber == 1)
+        try
         {
-            player1Monkey.SetActive(isMonkey);
-            player1Samurai.SetActive(!isMonkey);
-            isPlayer1Selected = true;
+            p1Monkey = player1.Find("monkeyPrefab").gameObject;
+            p1Samurai = player1.Find("samuraiPrefab").gameObject;
+            p2Monkey = player2.Find("monkeyPrefab").gameObject;
+            p2Samurai = player2.Find("samuraiPrefab").gameObject;
         }
-        else
+        catch (System.NullReferenceException)
         {
-            player2Monkey.SetActive(isMonkey);
-            player2Samurai.SetActive(!isMonkey);
-            isPlayer2Selected = true;
+            Debug.LogError("Un prefab est manquant sous les transforms des joueurs!");
+            enabled = false;
+            return;
+        }
+
+        p1Monkey.SetActive(false);
+        p1Samurai.SetActive(false);
+        p2Monkey.SetActive(false);
+        p2Samurai.SetActive(false);
+
+        monkeyButtonP1.onClick.AddListener(() => SelectCharacter(1, "monkey"));
+        samuraiButtonP1.onClick.AddListener(() => SelectCharacter(1, "samurai"));
+        monkeyButtonP2.onClick.AddListener(() => SelectCharacter(2, "monkey"));
+        samuraiButtonP2.onClick.AddListener(() => SelectCharacter(2, "samurai"));
+    }
+
+    private void SelectCharacter(int playerNumber, string character)
+    {
+        if (playerNumber == 1 && !isP1Selected)
+        {
+            isP1Selected = true;
+            p1Monkey.SetActive(character == "monkey");
+            p1Samurai.SetActive(character == "samurai");
+            OnCharacterSelected.Invoke(1, character);
+            CheckBothSelected();
+        }
+        else if (playerNumber == 2 && !isP2Selected)
+        {
+            isP2Selected = true;
+            p2Monkey.SetActive(character == "monkey");
+            p2Samurai.SetActive(character == "samurai");
+            OnCharacterSelected.Invoke(2, character);
+            CheckBothSelected();
         }
     }
 
-    private void NotifySelection(int playerNumber, string characterType)
+    private void CheckBothSelected()
     {
-        OnCharacterSelected.Invoke(playerNumber, characterType.ToLower());
-    }
-
-    private void CheckGameStartCondition()
-    {
-        if (isPlayer1Selected && isPlayer2Selected)
+        if (isP1Selected && isP2Selected)
         {
             selectionMenu.SetActive(false);
-            ResumeGame();
+            Time.timeScale = 1;
             enabled = false;
         }
     }
 
-    private void ResumeGame() => Time.timeScale = 1;
-
-    public void ResetSelections()
+    public void ResetSelection()
     {
-        isPlayer1Selected = false;
-        isPlayer2Selected = false;
-        SetActiveStateForAllPrefabs(false);
-        
-        if (selectionMenu != null) selectionMenu.SetActive(true);
-        
-        ResetAllHealthBars();
-        PauseGame();
-    }
+        isP1Selected = false;
+        isP2Selected = false;
 
-    private void ResetAllHealthBars()
-    {
+        p1Monkey.SetActive(false);
+        p1Samurai.SetActive(false);
+        p2Monkey.SetActive(false);
+        p2Samurai.SetActive(false);
+
+        if (selectionMenu != null)
+        {
+            selectionMenu.SetActive(true);
+        }
+
         foreach (HealthBar healthBar in FindObjectsOfType<HealthBar>())
         {
             healthBar.ResetHealth();
         }
+
+        Time.timeScale = 0;
     }
 }

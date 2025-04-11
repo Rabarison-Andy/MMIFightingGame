@@ -17,6 +17,9 @@ public class AnimatorManager : MonoBehaviour
     private Animator currentAnimator;
     private string currentCharacterType;
 
+    public string CurrentCharacterType => currentCharacterType;
+    public bool IsReady { get; private set; }
+
     private void Start()
     {
         selectPlayer.OnCharacterSelected.AddListener(HandleCharacterSelected);
@@ -50,7 +53,7 @@ public class AnimatorManager : MonoBehaviour
     private void UpdateAnimatorController()
     {
         currentAnimator = GetComponent<Animator>();
-        
+    
         switch (currentCharacterType)
         {
             case "monkey":
@@ -60,7 +63,9 @@ public class AnimatorManager : MonoBehaviour
                 currentAnimator.runtimeAnimatorController = characterAnimations.samuraiController;
                 break;
         }
-    }
+    
+    IsReady = true; // Nouveau flag
+}
 
     private void OnDestroy()
     {

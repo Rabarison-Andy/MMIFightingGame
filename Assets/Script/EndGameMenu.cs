@@ -12,6 +12,7 @@ public class EndGameMenu : MonoBehaviour
     [SerializeField]
     private Button restartButton;
 
+    [SerializeField]
     private Button quitButton;
 
     private void Start()
@@ -21,7 +22,8 @@ public class EndGameMenu : MonoBehaviour
 
         if (restartButton == null || quitButton == null || selectionCanvas == null || selectPlayerScript == null)
         {
-            Debug.LogError("Toutes les références doivent être assignées dans l'inspecteur");
+            Debug.LogError("Assignez toutes les références dans l'inspecteur !");
+            enabled = false;
             return;
         }
 
